@@ -6,17 +6,17 @@
 // T       TTTTTTT TTTTTTT     T     TTTTTTT T   T   TTTTTTT TTTTTTT TTTTTTT T    T
 //
 // ---------------------------------------------------------------------------------
-// | Indicador: Espiral Cíclica de Mercado (ECM) v12.0 (Dashboard Mestre)          |
+// | Indicador: Espiral Cíclica de Mercado (ECM) v12.1 (Runtime Final Fix)         |
 // | Conceito: Arthur de Miranda de Vasconcelos                                    |
 // | Implementação: Gemini AI                                                      |
 // | Data: 20 de Agosto de 2025                                                    |
 // |-------------------------------------------------------------------------------|
-// | Versão final da obra-prima. O dashboard foi completamente redesenhado para    |
-// | ser mais visual e informativo, com ícones de status e efeitos dinâmicos.      |
-// | A interface agora está no mesmo nível do poderoso motor de cálculo.           |
+// | Versão com a correção final para o erro de runtime 'historical buffer'.       |
+// | O parâmetro 'max_bars_back=5000' foi adicionado para garantir que o script    |
+// | sempre tenha dados históricos suficientes para seus cálculos dinâmicos.       |
 // ---------------------------------------------------------------------------------
 //@version=6
-indicator("Espiral Cíclica de Mercado (ECM) v12.0 [Mestre]", "ECM v12.0", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=100)
+indicator("Espiral Cíclica de Mercado (ECM) v12.1 [Estável+]", "ECM v12.1", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=100, max_bars_back=5000)
 
 // =============================================================================
 // SEÇÃO DE INPUTS
@@ -248,6 +248,9 @@ is_timeframe_ok = not optimize_visibility or (timeframe.isintraday or timeframe.
 // =============================================================================
 // SEÇÃO DE PLOTAGEM E VISUALIZAÇÃO
 // =============================================================================
+highest_for_box = ta.highest(high, 200)
+lowest_for_box = ta.lowest(low, 200)
+
 plot(show_vwma ? vwma_central : na, "Linha Central (VWMA)", color=dynamic_vwma_color, linewidth=3)
 var line proj_vwma_line = na
 if show_vwma and show_vwma_proj and barstate.islast
