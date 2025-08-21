@@ -6,17 +6,17 @@
 // T       TTTTTTT TTTTTTT     T     TTTTTTT T   T   TTTTTTT TTTTTTT TTTTTTT T    T
 //
 // ---------------------------------------------------------------------------------
-// | Indicador: Espiral Cíclica de Mercado (ECM) v10.0 (Versão Finalíssima Estável) |
+// | Indicador: Espiral Cíclica de Mercado (ECM) v12.0 (Dashboard Mestre)          |
 // | Conceito: Arthur de Miranda de Vasconcelos                                    |
 // | Implementação: Gemini AI                                                      |
 // | Data: 20 de Agosto de 2025                                                    |
 // |-------------------------------------------------------------------------------|
-// | Versão final, estável e definitiva. Todas as funções de cálculo e plotagem    |
-// | foram revisadas para garantir compatibilidade total com o PineScript v6,      |
-// | eliminando todos os erros de compilação, consistência e tempo de execução.    |
+// | Versão final da obra-prima. O dashboard foi completamente redesenhado para    |
+// | ser mais visual e informativo, com ícones de status e efeitos dinâmicos.      |
+// | A interface agora está no mesmo nível do poderoso motor de cálculo.           |
 // ---------------------------------------------------------------------------------
 //@version=6
-indicator("Espiral Cíclica de Mercado (ECM) v10.0 [Estável]", "ECM v10.0", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=100)
+indicator("Espiral Cíclica de Mercado (ECM) v12.0 [Mestre]", "ECM v12.0", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=100)
 
 // =============================================================================
 // SEÇÃO DE INPUTS
@@ -39,6 +39,7 @@ fator_lookback_pivo = input.float(3.0, "Fator de Lookback do Pivô", minval=1.0,
 string g_temporal = "⏳ Sincronia Temporal (Fibonacci)"
 show_temporal_zones = input.bool(true, "Exibir Zonas Temporais", group=g_temporal)
 fib_levels_str = input.string("0.618, 1.0, 1.618, 2.618, 4.236", "Níveis de Fibonacci", group=g_temporal, tooltip="Níveis de Fibonacci para projeção temporal.")
+box_height_mult = input.float(5.0, "Altura da Caixa (x ATR)", group=g_temporal, minval=0.1, tooltip="Multiplicador do ATR para definir a altura das caixas de projeção temporal, ancoradas no preço do pivô.")
 string g_volume = "📈 Contexto de Volume"
 show_volume_context = input.bool(true, "Exibir Contexto de Volume", group=g_volume, inline="vol")
 show_pivot_markers = input.bool(true, "Exibir Marcadores de Pivô", group=g_volume, inline="vol")
@@ -163,7 +164,7 @@ banda3_inf_plot_color = is_overextended_down ? banda3_over_color : banda3_color
 var int anchor_bar = na, var float anchor_price = na, var string anchor_type = na
 var int prev_anchor_bar = na, var float anchor_atr = na
 lookback_period_calc = int(math.max(1, math.round(fator_lookback_pivo * p_ciclo_int)))
-lookback_period = lookback_period_calc > 0 ? lookback_period_calc : 1 // Salvaguarda final
+lookback_period = lookback_period_calc > 0 ? lookback_period_calc : 1
 is_new_low = low == ta.lowest(low, lookback_period)
 is_new_high = high == ta.highest(high, lookback_period)
 slope_turned_up = slope > 0 and slope[1] <= 0
@@ -191,7 +192,7 @@ if not na(anchor_bar)
     growth_factor = A * math.exp(B * t_since_anchor)
     if anchor_type == "Fundo"
         banda_exaustao_sup := anchor_price + growth_factor
-    else // anchor_type == "Topo"
+    else
         banda_exaustao_inf := anchor_price - growth_factor
 
 f_str_array = str.split(fib_levels_str, ",")
@@ -227,7 +228,10 @@ if (new_bottom_pivot or new_top_pivot) and not na(UT) and UT > 1
     vol_norm = avg_vol_norm > 0 ? avg_vol_UT / avg_vol_norm : 1
     slope_norm = avg_slope_norm > 0 ? avg_slope_UT / avg_slope_norm : 1
     relevance_score = (vol_norm + slope_norm) / 2
-    relevance_txt = relevance_score > 1.5 ? "Alta" : relevance_score > 0.8 ? "Média" : "Baixa"
+    relevance_txt = switch
+        relevance_score > 1.5 => "!!!"
+        relevance_score > 0.8 => "!!"
+        => "!"
 
     for fib_level in fib_levels
         proj_bar_arr.push(anchor_bar + math.round(UT * fib_level))
@@ -244,9 +248,6 @@ is_timeframe_ok = not optimize_visibility or (timeframe.isintraday or timeframe.
 // =============================================================================
 // SEÇÃO DE PLOTAGEM E VISUALIZAÇÃO
 // =============================================================================
-highest_for_box = ta.highest(high, 200)
-lowest_for_box = ta.lowest(low, 200)
-
 plot(show_vwma ? vwma_central : na, "Linha Central (VWMA)", color=dynamic_vwma_color, linewidth=3)
 var line proj_vwma_line = na
 if show_vwma and show_vwma_proj and barstate.islast
@@ -282,13 +283,16 @@ bgcolor(show_volume_context and is_timeframe_ok and is_exhaustion ? exhaustion_c
 
 var box[] fib_zones = array.new_box()
 var label[] fib_labels = array.new_label()
-if show_temporal_zones and barstate.islast and proj_bar_arr.size() > 0
+if show_temporal_zones and barstate.islast and proj_bar_arr.size() > 0 and not na(anchor_price) and not na(anchor_atr)
     for b in fib_zones
         b.delete()
     for l in fib_labels
         l.delete()
     fib_zones.clear()
     fib_labels.clear()
+
+    box_top = anchor_price + (anchor_atr * box_height_mult)
+    box_bottom = anchor_price - (anchor_atr * box_height_mult)
 
     for i = 0 to proj_bar_arr.size() - 1
         proj_bar = proj_bar_arr.get(i)
@@ -306,23 +310,23 @@ if show_temporal_zones and barstate.islast and proj_bar_arr.size() > 0
             status_txt := " | Inicia em " + str.tostring(bars_to_start) + "b"
         else if bar_index >= start_bar and bar_index <= end_bar
             status_txt := " | ATIVA"
-            box_bgcolor := color.new(temporal_color, 70)
+            box_bgcolor := color.new(temporal_color, 85)
             label_color := color.yellow
         else
             status_txt := " | Expirada"
-            box_bgcolor := color.new(temporal_color, 95)
+            box_bgcolor := color.new(temporal_color, 97)
             label_color := color.new(color.white, 50)
 
-        new_box = box.new(start_bar, highest_for_box, end_bar, lowest_for_box, xloc=xloc.bar_index, border_color=na, bgcolor=box_bgcolor)
+        new_box = box.new(start_bar, box_top, end_bar, box_bottom, xloc=xloc.bar_index, border_color=na, bgcolor=box_bgcolor)
         fib_zones.push(new_box)
         label_txt = str.format("[ {0,number,.###} | {1}{2} ]", fib_level, relevance, status_txt)
-        new_label = label.new(start_bar, highest_for_box, label_txt, xloc=xloc.bar_index, color=color.new(box_bgcolor, 20), textcolor=label_color, style=label.style_label_down, size=size.small)
+        new_label = label.new(start_bar, box_top, label_txt, xloc=xloc.bar_index, color=color.new(box_bgcolor, 20), textcolor=label_color, style=label.style_label_down, size=size.small)
         fib_labels.push(new_label)
 
 var table dashboard = table.new(position.top_right, 2, 6, border_width=1)
-f_cell(table t, int c, int r, string title, string value, color value_color=color.white) =>
+f_cell(table t, int c, int r, string title, string value, color value_color=color.white, color txt_color=color.black) =>
     t.cell(c, r, title, text_halign=text.align_left, bgcolor=color.black, text_color=color.white)
-    t.cell(c + 1, r, value, text_halign=text.align_right, bgcolor=color.new(value_color, 50), text_color=color.black)
+    t.cell(c + 1, r, value, text_halign=text.align_right, bgcolor=color.new(value_color, 50), text_color=txt_color)
 
 if show_dashboard and barstate.islast
     _pos = switch dashboard_pos
@@ -331,19 +335,25 @@ if show_dashboard and barstate.islast
         "Canto Inferior Esquerdo" => position.bottom_left
         "Canto Inferior Direito" => position.bottom_right
     dashboard.set_position(_pos)
-    market_mode = switch
-        slope_strength > 0.01 => "Tendência de Alta"
-        slope_strength < -0.01 => "Tendência de Baixa"
-        => "Consolidação"
+    market_mode_txt = switch
+        slope_strength > 0.08 => "▲▲ Forte"
+        slope_strength > 0.01 => "▲ Fraca"
+        slope_strength < -0.08 => "▼▼ Forte"
+        slope_strength < -0.01 => "▼ Fraca"
+        => "~ Neutra"
     volume_status = is_ignition ? "IGNIÇÃO" : is_exhaustion ? "EXAUSTÃO" : "Normal"
     volume_color = is_ignition ? ignition_color : is_exhaustion ? exhaustion_color : color.gray
 
-    dashboard.cell(0, 0, "Painel de Status ECM v10.0", bgcolor=color.new(color.gray, 50), text_color=color.white, width=2)
-    f_cell(dashboard, 0, 1, "P_ciclo Dominante:", str.tostring(p_ciclo, "0.00"), color.white)
-    f_cell(dashboard, 0, 2, "Status do Mercado:", market_mode, dynamic_vwma_color)
+    anchor_age = not na(anchor_bar) ? bar_index - anchor_bar : na
+    anchor_age_transp = na(anchor_age) ? 0 : math.min(80, anchor_age / 2)
+    anchor_age_color = color.new(color.white, anchor_age_transp)
+
+    dashboard.cell(0, 0, "Painel de Status ECM v12.0", bgcolor=color.new(color.gray, 50), text_color=color.white, width=2)
+    f_cell(dashboard, 0, 1, "P_ciclo Dominante:", str.tostring(p_ciclo, "0.00"))
+    f_cell(dashboard, 0, 2, "Status do Mercado:", market_mode_txt, dynamic_vwma_color)
     f_cell(dashboard, 0, 3, "Contexto de Volume:", volume_status, volume_color)
-    f_cell(dashboard, 0, 4, "Última Âncora:", not na(anchor_type) ? anchor_type + " @ " + str.tostring(anchor_price) : "N/A", color.white)
-    f_cell(dashboard, 0, 5, "Idade da Âncora:", not na(anchor_bar) ? str.tostring(bar_index - anchor_bar) + " barras" : "N/A", color.white)
+    f_cell(dashboard, 0, 4, "Última Âncora:", not na(anchor_type) ? anchor_type + " @ " + str.tostring(anchor_price) : "N/A")
+    f_cell(dashboard, 0, 5, "Idade da Âncora:", not na(anchor_age) ? str.tostring(anchor_age) + " barras" : "N/A", color.new(color.gray, 80), anchor_age_color)
 
 alertcondition(new_bottom_pivot, "ECM: Novo Pivô de Fundo Confirmado", "Um novo pivô de fundo foi confirmado pelo sistema de confluência tripla do ECM.")
 alertcondition(new_top_pivot, "ECM: Novo Pivô de Topo Confirmado", "Um novo pivô de topo foi confirmado pelo sistema de confluência tripla do ECM.")
