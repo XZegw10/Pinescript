@@ -1,0 +1,367 @@
+// T                                                                            T
+// TTTTTTT TTTTTTT TTTTTTT   TTTTTTT TTTTTTT TTTTTTT TTTTTTT TTTTTTT TTTTTTT TTTTTT
+// T       T       T           T     T       T   T   T       T       T       T    T
+// TTTTT   TTTTT   TTTTT       T     TTTTT   TTTTT   TTTTT   TTTTT   TTTTT   TTTTTT
+// T       T       T           T     T       T  T    T       T           T   T    T
+// T       TTTTTTT TTTTTTT     T     TTTTTTT T   T   TTTTTTT TTTTTTT TTTTTTT T    T
+//
+// ---------------------------------------------------------------------------------
+// | Indicador: Espiral Cíclica de Mercado (ECM) v12.1 (Runtime Final Fix)         |
+// | Conceito: Arthur de Miranda de Vasconcelos                                    |
+// | Implementação: Gemini AI                                                      |
+// | Data: 20 de Agosto de 2025                                                    |
+// |-------------------------------------------------------------------------------|
+// | Versão com a correção final para o erro de runtime 'historical buffer'.       |
+// | O parâmetro 'max_bars_back=5000' foi adicionado para garantir que o script    |
+// | sempre tenha dados históricos suficientes para seus cálculos dinâmicos.       |
+// ---------------------------------------------------------------------------------
+//@version=6
+indicator("Espiral Cíclica de Mercado (ECM) v12.1 [Estável+]", "ECM v12.1", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=100, max_bars_back=5000)
+
+// =============================================================================
+// SEÇÃO DE INPUTS
+// =============================================================================
+string g_geral = "⚙️ Geral & Motor Cíclico"
+price_src = input.source(close, "Fonte do Preço", group=g_geral, tooltip="Fonte de preço principal para todos os cálculos.")
+ciclo_filter_period = input.int(3, "Período Filtro Cíclico", minval=1, group=g_geral, tooltip="Suavização do motor de ciclo.")
+string g_vwma = "🌊 Linha Central (VWMA)"
+show_vwma = input.bool(true, "Exibir Linha Central", group=g_vwma, inline="vwma")
+show_vwma_proj = input.bool(true, "Exibir Projeção", group=g_vwma, inline="vwma")
+proj_period_factor = input.int(1, "Período da Projeção (x P_ciclo)", minval=1, group=g_vwma, tooltip="Define o quão longe no futuro a linha central e as bandas táticas serão projetadas.")
+string g_bands_taticas = "🎯 Bandas Táticas (Baseadas em ϕ)"
+show_bands_taticas = input.bool(true, "Exibir Bandas Táticas", group=g_bands_taticas)
+mult1 = input.float(1.0, "Multiplicador 1", group=g_bands_taticas, inline="mult")
+mult2 = input.float(1.618, "Multiplicador 2", group=g_bands_taticas, inline="mult")
+mult3 = input.float(2.618, "Multiplicador 3", group=g_bands_taticas, inline="mult")
+string g_bands_exaustao = "🚫 Bandas de Exaustão (Ancoradas)"
+show_bands_exaustao = input.bool(true, "Exibir Bandas de Exaustão", group=g_bands_exaustao)
+fator_lookback_pivo = input.float(3.0, "Fator de Lookback do Pivô", minval=1.0, group=g_bands_exaustao, tooltip="Controla a magnitude do movimento para definir uma nova âncora.")
+string g_temporal = "⏳ Sincronia Temporal (Fibonacci)"
+show_temporal_zones = input.bool(true, "Exibir Zonas Temporais", group=g_temporal)
+fib_levels_str = input.string("0.618, 1.0, 1.618, 2.618, 4.236", "Níveis de Fibonacci", group=g_temporal, tooltip="Níveis de Fibonacci para projeção temporal.")
+box_height_mult = input.float(5.0, "Altura da Caixa (x ATR)", group=g_temporal, minval=0.1, tooltip="Multiplicador do ATR para definir a altura das caixas de projeção temporal, ancoradas no preço do pivô.")
+string g_volume = "📈 Contexto de Volume"
+show_volume_context = input.bool(true, "Exibir Contexto de Volume", group=g_volume, inline="vol")
+show_pivot_markers = input.bool(true, "Exibir Marcadores de Pivô", group=g_volume, inline="vol")
+fator_vol_climatico = input.float(2.0, "Fator de Volume Climático", minval=0.1, group=g_volume, tooltip="Define o que é um volume 'anômalo'.")
+optimize_visibility = input.bool(true, "Otimizar Visibilidade (Ocultar em >D)", group=g_volume, tooltip="Oculta o 'bgcolor' em timeframes > Diário.")
+string g_dashboard = "📊 Painel de Status (Dashboard)"
+show_dashboard = input.bool(true, "Exibir Painel de Status", group=g_dashboard)
+dashboard_pos = input.string("Canto Superior Direito", "Posição do Painel", options=["Canto Superior Esquerdo", "Canto Superior Direito", "Canto Inferior Esquerdo", "Canto Inferior Direito"], group=g_dashboard)
+string g_style = "🎨 Estilo Visual & Cores"
+strong_up_color = input.color(color.new(color.teal, 0), "Alta Forte", group=g_style, inline="c1")
+weak_up_color = input.color(color.new(color.green, 40), "Alta Fraca", group=g_style, inline="c1")
+consol_color = input.color(color.new(color.gray, 40), "Consolidação", group=g_style, inline="c1")
+weak_down_color = input.color(color.new(color.maroon, 40), "Baixa Fraca", group=g_style, inline="c2")
+strong_down_color = input.color(color.new(color.red, 0), "Baixa Forte", group=g_style, inline="c2")
+banda1_color = input.color(color.new(color.teal, 80), "Banda 1", group=g_style, inline="c3")
+banda2_color = input.color(color.new(color.orange, 80), "Banda 2", group=g_style, inline="c3")
+banda3_color = input.color(color.new(color.red, 80), "Banda 3", group=g_style, inline="c4")
+banda3_over_color = input.color(color.new(color.yellow, 0), "Banda 3 Ext.", group=g_style, inline="c4")
+exaustao_color = input.color(color.new(color.purple, 50), "Exaustão", group=g_style, inline="c5")
+temporal_color = input.color(color.new(color.blue, 85), "Temporal", group=g_style, inline="c5")
+ignition_color = input.color(color.new(#FFD700, 80), "Ignição", group=g_style, inline="c6")
+exhaustion_color = input.color(color.new(color.fuchsia, 75), "Exaustão Vol.", group=g_style, inline="c6")
+
+// =============================================================================
+// FUNÇÕES MANUAIS PARA PERÍODOS DINÂMICOS
+// =============================================================================
+f_manual_sma(series float src, series int len) =>
+    if na(len) or len <= 0
+        na
+    else
+        float sum = 0
+        for i = 0 to len - 1
+            sum += src[i]
+        sum / len
+
+f_manual_vwma(series float src, series int len) =>
+    if na(len) or len <= 0
+        na
+    else
+        float sum_src_vol = 0
+        float sum_vol = 0
+        for i = 0 to len - 1
+            sum_src_vol += src[i] * volume[i]
+            sum_vol += volume[i]
+        sum_vol > 0 ? sum_src_vol / sum_vol : na
+
+f_manual_rma(series float src, series int len) =>
+    var float rma = na
+    if na(len) or len <= 0
+        rma := na
+    else
+        float alpha = 1.0 / len
+        rma := alpha * src + (1 - alpha) * nz(rma[1], src)
+    rma
+
+f_manual_atr(series int len) =>
+    f_manual_rma(ta.tr, len)
+
+f_get_vwma_color(float slope_strength) =>
+    switch
+        slope_strength > 0.08 => strong_up_color
+        slope_strength > 0.01 => weak_up_color
+        slope_strength < -0.08 => strong_down_color
+        slope_strength < -0.01 => weak_down_color
+        => consol_color
+
+// =============================================================================
+// MÓDULO 1: O MOTOR CÍCLICO ESTABILIZADO
+// =============================================================================
+var float hp = 0., var float filt = 0., var float instPeriod = 0., var float raw_period = 10.
+alpha1 = (math.cos(0.707 * 2 * math.pi / 48) + math.sin(0.707 * 2 * math.pi / 48) - 1) / math.cos(0.707 * 2 * math.pi / 48)
+hp := (1 - alpha1 / 2) * (1 - alpha1 / 2) * (price_src - 2 * nz(price_src[1]) + nz(price_src[2])) + 2 * (1 - alpha1) * nz(hp[1]) - (1 - alpha1) * (1 - alpha1) * nz(hp[2])
+a1 = math.exp(-1.414 * math.pi / 10)
+b1 = 2 * a1 * math.cos(1.414 * math.pi / 10)
+c1 = 1 - b1 - (-a1 * a1)
+filt := c1 * (hp + nz(hp[1])) / 2 + b1 * nz(filt[1]) + (-a1 * a1) * nz(filt[2])
+q1 = (0.0962 * filt + 0.5769 * nz(filt[2]) - 0.5769 * nz(filt[4]) - 0.0962 * nz(filt[6])) * (0.5 + 0.08 * (nz(instPeriod[1]) > 0 ? nz(instPeriod[1]) : 1))
+i1 = nz(filt[3])
+re = i1 * nz(i1[1]) + q1 * nz(q1[1])
+im = i1 * nz(q1[1]) - q1 * nz(i1[1])
+deltaPhase = re != 0 ? math.atan(im / re) : 0
+sumPhase = 0.0
+for i = 0 to 49 by 1
+    sumPhase += nz(deltaPhase[i])
+    if sumPhase > 2 * math.pi and i > 0
+        instPeriod := i
+        break
+raw_period := instPeriod > 0 ? instPeriod : nz(raw_period[1], 10)
+p_ciclo = ta.ema(raw_period, ciclo_filter_period)
+p_ciclo_int = int(math.max(1, math.round(p_ciclo)))
+
+// =============================================================================
+// MÓDULO 2: A LINHA CENTRAL SINCRONIZADA
+// =============================================================================
+vwma_central = f_manual_vwma(price_src, p_ciclo_int)
+slope = vwma_central - vwma_central[1]
+atr_base = f_manual_atr(p_ciclo_int)
+slope_strength = atr_base > 0 ? slope / atr_base : 0
+dynamic_vwma_color = f_get_vwma_color(slope_strength)
+projection_length = p_ciclo_int * proj_period_factor
+
+// =============================================================================
+// MÓDULO 3: ENVELOPES DE VOLATILIDADE
+// =============================================================================
+vol_avg = f_manual_sma(volume, p_ciclo_int)
+fator_vol = vol_avg > 0 ? volume / vol_avg : 1
+atr_ponderado = atr_base * fator_vol
+banda1_sup = vwma_central + mult1 * atr_ponderado
+banda1_inf = vwma_central - mult1 * atr_ponderado
+banda2_sup = vwma_central + mult2 * atr_ponderado
+banda2_inf = vwma_central - mult2 * atr_ponderado
+banda3_sup = vwma_central + mult3 * atr_ponderado
+banda3_inf = vwma_central - mult3 * atr_ponderado
+is_overextended_up = close > banda3_sup[1]
+is_overextended_down = close < banda3_inf[1]
+banda3_sup_plot_color = is_overextended_up ? banda3_over_color : banda3_color
+banda3_inf_plot_color = is_overextended_down ? banda3_over_color : banda3_color
+
+// =============================================================================
+// MÓDULOS 4 & 6: PIVÔS, ANCORAGEM E SINCRONIA TEMPORAL
+// =============================================================================
+var int anchor_bar = na, var float anchor_price = na, var string anchor_type = na
+var int prev_anchor_bar = na, var float anchor_atr = na
+lookback_period_calc = int(math.max(1, math.round(fator_lookback_pivo * p_ciclo_int)))
+lookback_period = lookback_period_calc > 0 ? lookback_period_calc : 1
+is_new_low = low == ta.lowest(low, lookback_period)
+is_new_high = high == ta.highest(high, lookback_period)
+slope_turned_up = slope > 0 and slope[1] <= 0
+slope_turned_down = slope < 0 and slope[1] >= 0
+cycle_reset = p_ciclo < p_ciclo[1] and p_ciclo[1] > p_ciclo[2]
+new_bottom_pivot = is_new_low and slope_turned_up and cycle_reset
+new_top_pivot = is_new_high and slope_turned_down and cycle_reset
+var int UT = na
+if (new_bottom_pivot or new_top_pivot)
+    if not na(anchor_bar)
+        prev_anchor_bar := anchor_bar
+        UT := bar_index - prev_anchor_bar
+    anchor_bar := bar_index
+    anchor_type := new_bottom_pivot ? "Fundo" : "Topo"
+    anchor_price := new_bottom_pivot ? low : high
+    anchor_atr := atr_base
+
+t_since_anchor = not na(anchor_bar) ? bar_index - anchor_bar : na
+avg_slope_since_anchor = f_manual_sma(math.abs(slope), t_since_anchor + 1)
+banda_exaustao_sup = float(na)
+banda_exaustao_inf = float(na)
+if not na(anchor_bar)
+    A = anchor_atr
+    B = avg_slope_since_anchor * 0.1
+    growth_factor = A * math.exp(B * t_since_anchor)
+    if anchor_type == "Fundo"
+        banda_exaustao_sup := anchor_price + growth_factor
+    else
+        banda_exaustao_inf := anchor_price - growth_factor
+
+f_str_array = str.split(fib_levels_str, ",")
+var float[] fib_levels = array.new_float()
+if barstate.isfirst
+    for s in f_str_array
+        fib_levels.push(str.tonumber(str.trim(s)))
+
+var proj_bar_arr = array.new_int()
+var relevance_txt_arr = array.new_string()
+if (new_bottom_pivot or new_top_pivot) and not na(UT) and UT > 1
+    proj_bar_arr.clear()
+    relevance_txt_arr.clear()
+
+    float[] slope_subset_ut = array.new_float()
+    float[] vol_subset_ut = array.new_float()
+    for i = 0 to UT - 1
+        slope_subset_ut.push(math.abs(slope[i]))
+        vol_subset_ut.push(volume[i])
+
+    int norm_len = UT * 3
+    float[] slope_subset_norm = array.new_float()
+    float[] vol_subset_norm = array.new_float()
+    for i = 0 to norm_len - 1
+        slope_subset_norm.push(math.abs(slope[i]))
+        vol_subset_norm.push(volume[i])
+
+    avg_slope_UT = slope_subset_ut.avg()
+    avg_vol_UT = vol_subset_ut.avg()
+    avg_slope_norm = slope_subset_norm.avg()
+    avg_vol_norm = vol_subset_norm.avg()
+
+    vol_norm = avg_vol_norm > 0 ? avg_vol_UT / avg_vol_norm : 1
+    slope_norm = avg_slope_norm > 0 ? avg_slope_UT / avg_slope_norm : 1
+    relevance_score = (vol_norm + slope_norm) / 2
+    relevance_txt = switch
+        relevance_score > 1.5 => "!!!"
+        relevance_score > 0.8 => "!!"
+        => "!"
+
+    for fib_level in fib_levels
+        proj_bar_arr.push(anchor_bar + math.round(UT * fib_level))
+        relevance_txt_arr.push(relevance_txt)
+
+// =============================================================================
+// MÓDULO 5: CONTEXTO DE VOLUME
+// =============================================================================
+vol_anomalo = volume > vol_avg * fator_vol_climatico
+is_ignition = vol_anomalo and (close <= banda1_sup and close >= banda1_inf)
+is_exhaustion = vol_anomalo and (close >= banda3_sup or close <= banda3_inf or (not na(banda_exaustao_sup) and high >= banda_exaustao_sup) or (not na(banda_exaustao_inf) and low <= banda_exaustao_inf))
+is_timeframe_ok = not optimize_visibility or (timeframe.isintraday or timeframe.isdaily)
+
+// =============================================================================
+// SEÇÃO DE PLOTAGEM E VISUALIZAÇÃO
+// =============================================================================
+highest_for_box = ta.highest(high, 200)
+lowest_for_box = ta.lowest(low, 200)
+
+plot(show_vwma ? vwma_central : na, "Linha Central (VWMA)", color=dynamic_vwma_color, linewidth=3)
+var line proj_vwma_line = na
+if show_vwma and show_vwma_proj and barstate.islast
+    line.delete(proj_vwma_line)
+    proj_vwma_line := line.new(bar_index, vwma_central, bar_index + projection_length, vwma_central + projection_length * slope, color=color.new(dynamic_vwma_color, 50), style=line.style_dashed, width=2)
+else
+    line.delete(proj_vwma_line)
+
+p1s = plot(show_bands_taticas ? banda1_sup : na, "Banda Tática 1 Sup", color = banda1_color, display=display.none)
+p1i = plot(show_bands_taticas ? banda1_inf : na, "Banda Tática 1 Inf", color = banda1_color, display=display.none)
+fill(p1s, p1i, color=show_bands_taticas ? color.new(banda1_color, 90) : na, title="Fill Tático 1")
+p2s = plot(show_bands_taticas ? banda2_sup : na, "Banda Tática 2 Sup", color = banda2_color, display=display.none)
+p2i = plot(show_bands_taticas ? banda2_inf : na, "Banda Tática 2 Inf", color = banda2_color, display=display.none)
+fill(p1s, p2s, color=show_bands_taticas ? color.new(banda2_color, 92) : na, title="Fill Banda 1-2 Sup")
+fill(p1i, p2i, color=show_bands_taticas ? color.new(banda2_color, 92) : na, title="Fill Banda 1-2 Inf")
+plot(show_bands_taticas ? banda3_sup : na, "Banda Tática 3 Sup", color=show_bands_taticas ? banda3_sup_plot_color : na, style=plot.style_stepline, linewidth=2)
+plot(show_bands_taticas ? banda3_inf : na, "Banda Tática 3 Inf", color=show_bands_taticas ? banda3_inf_plot_color : na, style=plot.style_stepline, linewidth=2)
+
+if show_bands_taticas and show_vwma_proj and barstate.islast
+    line.new(bar_index, banda1_sup, bar_index + projection_length, banda1_sup + projection_length * slope, color=color.new(banda1_color, 70), style=line.style_dotted)
+    line.new(bar_index, banda1_inf, bar_index + projection_length, banda1_inf + projection_length * slope, color=color.new(banda1_color, 70), style=line.style_dotted)
+    line.new(bar_index, banda2_sup, bar_index + projection_length, banda2_sup + projection_length * slope, color=color.new(banda2_color, 70), style=line.style_dotted)
+    line.new(bar_index, banda2_inf, bar_index + projection_length, banda2_inf + projection_length * slope, color=color.new(banda2_color, 70), style=line.style_dotted)
+    line.new(bar_index, banda3_sup, bar_index + projection_length, banda3_sup + projection_length * slope, color=color.new(banda3_sup_plot_color, 70), style=line.style_dotted)
+    line.new(bar_index, banda3_inf, bar_index + projection_length, banda3_inf + projection_length * slope, color=color.new(banda3_inf_plot_color, 70), style=line.style_dotted)
+
+plot(show_bands_exaustao ? banda_exaustao_sup : na, "Banda Exaustão Superior", color=exaustao_color, linewidth=2, style=plot.style_circles)
+plot(show_bands_exaustao ? banda_exaustao_inf : na, "Banda Exaustão Inferior", color=exaustao_color, linewidth=2, style=plot.style_circles)
+plotchar(show_pivot_markers and new_bottom_pivot, "Pivô Fundo", "▲", location.belowbar, color.new(color.lime, 0), size=size.small)
+plotchar(show_pivot_markers and new_top_pivot, "Pivô Topo", "▼", location.abovebar, color.new(color.red, 0), size=size.small)
+bgcolor(show_volume_context and is_timeframe_ok and is_ignition ? ignition_color : na, title="Volume de Ignição")
+bgcolor(show_volume_context and is_timeframe_ok and is_exhaustion ? exhaustion_color : na, title="Volume de Exaustão")
+
+var box[] fib_zones = array.new_box()
+var label[] fib_labels = array.new_label()
+if show_temporal_zones and barstate.islast and proj_bar_arr.size() > 0 and not na(anchor_price) and not na(anchor_atr)
+    for b in fib_zones
+        b.delete()
+    for l in fib_labels
+        l.delete()
+    fib_zones.clear()
+    fib_labels.clear()
+
+    box_top = anchor_price + (anchor_atr * box_height_mult)
+    box_bottom = anchor_price - (anchor_atr * box_height_mult)
+
+    for i = 0 to proj_bar_arr.size() - 1
+        proj_bar = proj_bar_arr.get(i)
+        relevance = relevance_txt_arr.get(i)
+        fib_level = fib_levels.get(i)
+        window_width = math.max(3, int(math.round(p_ciclo_int * fib_level * 0.1)))
+        start_bar = proj_bar - window_width
+        end_bar = proj_bar + window_width
+        status_txt = ""
+        box_bgcolor = temporal_color
+        label_color = color.white
+
+        if bar_index < start_bar
+            bars_to_start = start_bar - bar_index
+            status_txt := " | Inicia em " + str.tostring(bars_to_start) + "b"
+        else if bar_index >= start_bar and bar_index <= end_bar
+            status_txt := " | ATIVA"
+            box_bgcolor := color.new(temporal_color, 85)
+            label_color := color.yellow
+        else
+            status_txt := " | Expirada"
+            box_bgcolor := color.new(temporal_color, 97)
+            label_color := color.new(color.white, 50)
+
+        new_box = box.new(start_bar, box_top, end_bar, box_bottom, xloc=xloc.bar_index, border_color=na, bgcolor=box_bgcolor)
+        fib_zones.push(new_box)
+        label_txt = str.format("[ {0,number,.###} | {1}{2} ]", fib_level, relevance, status_txt)
+        new_label = label.new(start_bar, box_top, label_txt, xloc=xloc.bar_index, color=color.new(box_bgcolor, 20), textcolor=label_color, style=label.style_label_down, size=size.small)
+        fib_labels.push(new_label)
+
+var table dashboard = table.new(position.top_right, 2, 6, border_width=1)
+f_cell(table t, int c, int r, string title, string value, color value_color=color.white, color txt_color=color.black) =>
+    t.cell(c, r, title, text_halign=text.align_left, bgcolor=color.black, text_color=color.white)
+    t.cell(c + 1, r, value, text_halign=text.align_right, bgcolor=color.new(value_color, 50), text_color=txt_color)
+
+if show_dashboard and barstate.islast
+    _pos = switch dashboard_pos
+        "Canto Superior Esquerdo" => position.top_left
+        "Canto Superior Direito" => position.top_right
+        "Canto Inferior Esquerdo" => position.bottom_left
+        "Canto Inferior Direito" => position.bottom_right
+    dashboard.set_position(_pos)
+    market_mode_txt = switch
+        slope_strength > 0.08 => "▲▲ Forte"
+        slope_strength > 0.01 => "▲ Fraca"
+        slope_strength < -0.08 => "▼▼ Forte"
+        slope_strength < -0.01 => "▼ Fraca"
+        => "~ Neutra"
+    volume_status = is_ignition ? "IGNIÇÃO" : is_exhaustion ? "EXAUSTÃO" : "Normal"
+    volume_color = is_ignition ? ignition_color : is_exhaustion ? exhaustion_color : color.gray
+
+    anchor_age = not na(anchor_bar) ? bar_index - anchor_bar : na
+    anchor_age_transp = na(anchor_age) ? 0 : math.min(80, anchor_age / 2)
+    anchor_age_color = color.new(color.white, anchor_age_transp)
+
+    dashboard.cell(0, 0, "Painel de Status ECM v12.0", bgcolor=color.new(color.gray, 50), text_color=color.white, width=2)
+    f_cell(dashboard, 0, 1, "P_ciclo Dominante:", str.tostring(p_ciclo, "0.00"))
+    f_cell(dashboard, 0, 2, "Status do Mercado:", market_mode_txt, dynamic_vwma_color)
+    f_cell(dashboard, 0, 3, "Contexto de Volume:", volume_status, volume_color)
+    f_cell(dashboard, 0, 4, "Última Âncora:", not na(anchor_type) ? anchor_type + " @ " + str.tostring(anchor_price) : "N/A")
+    f_cell(dashboard, 0, 5, "Idade da Âncora:", not na(anchor_age) ? str.tostring(anchor_age) + " barras" : "N/A", color.new(color.gray, 80), anchor_age_color)
+
+alertcondition(new_bottom_pivot, "ECM: Novo Pivô de Fundo Confirmado", "Um novo pivô de fundo foi confirmado pelo sistema de confluência tripla do ECM.")
+alertcondition(new_top_pivot, "ECM: Novo Pivô de Topo Confirmado", "Um novo pivô de topo foi confirmado pelo sistema de confluência tripla do ECM.")
+alertcondition(is_ignition, "ECM: Volume de Ignição Detectado", "Volume anômalo detectado próximo à Linha Central. Potencial início de movimento.")
+alertcondition(is_exhaustion, "ECM: Volume de Exaustão Detectado", "Volume anômalo detectado em uma zona de extremo das bandas. Potencial fim de movimento.")
+alertcondition(high >= banda_exaustao_sup and not na(banda_exaustao_sup), "ECM: Preço Atingiu Banda de Exaustão Superior", "O preço atingiu ou ultrapassou a banda de exaustão superior ancorada.")
+alertcondition(low <= banda_exaustao_inf and not na(banda_exaustao_inf), "ECM: Preço Atingiu Banda de Exaustão Inferior", "O preço atingiu ou ultrapassou a banda de exaustão inferior ancorada.")
+// FIM DO SCRIPT
